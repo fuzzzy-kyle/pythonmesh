@@ -72,6 +72,7 @@ analysis = ["dash", "dash-bootstrap-components", "pandas", "pandas-stubs"]
 
 [tool.poetry.scripts]
 meshtastic = "meshtastic.__main__:main"
+meshtastic-gui = "meshtastic.gui:main"
 mesh-tunnel = "meshtastic.__main__:tunnelMain [tunnel]"
 mesh-analysis = "meshtastic.analysis.__main__:main [analysis]"
 

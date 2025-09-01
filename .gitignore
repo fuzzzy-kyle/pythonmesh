@@ -10,6 +10,7 @@ nanopb-*
 .coverage
 *.py-E
 venv/
+venv_new/
 *pyc
 .DS_Store
 __pycache__
@@ -18,3 +19,9 @@ meshtastic.spec
 .hypothesis/
 coverage.xml
 .ipynb_checkpoints
+
+# Claude Code files
+CLAUDE.md
+GUI_README.md
+test_gui_connection.py
+test_minimal_gui.py
