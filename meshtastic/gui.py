@@ -28,7 +28,7 @@ class MeshtasticGUI:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Meshtastic GUI")
+        self.root.title("Meshtastic Dashboard")
         self.root.geometry("1200x800")
         
         self.interface: Optional[MeshInterface] = None
@@ -41,6 +41,7 @@ class MeshtasticGUI:
         self.selected_node = None
         self.sort_column = None
         self.sort_reverse = False
+        self.favorite_nodes = set()  # Store favorite node IDs
         
         # Create main layout
         self.create_widgets()
@@ -87,12 +88,12 @@ class MeshtasticGUI:
         # Connection method selection (only one at a time)
         self.conn_method = tk.StringVar(value="serial")
         
-        ttk.Radiobutton(method_frame, text="Serial/USB", variable=self.conn_method, 
-                       value="serial", command=self.on_connection_method_changed).grid(row=0, column=0, sticky=tk.W, padx=5)
-        ttk.Radiobutton(method_frame, text="Bluetooth LE", variable=self.conn_method, 
-                       value="ble", command=self.on_connection_method_changed).grid(row=0, column=1, sticky=tk.W, padx=5)
-        ttk.Radiobutton(method_frame, text="TCP/IP", variable=self.conn_method, 
-                       value="tcp", command=self.on_connection_method_changed).grid(row=0, column=2, sticky=tk.W, padx=5)
+        tk.Radiobutton(method_frame, text="Serial/USB", variable=self.conn_method, 
+                      value="serial", command=self.on_connection_method_changed, indicatoron=True).grid(row=0, column=0, sticky=tk.W, padx=5)
+        tk.Radiobutton(method_frame, text="Bluetooth LE", variable=self.conn_method, 
+                      value="ble", command=self.on_connection_method_changed, indicatoron=True).grid(row=0, column=1, sticky=tk.W, padx=5)
+        tk.Radiobutton(method_frame, text="TCP/IP", variable=self.conn_method, 
+                      value="tcp", command=self.on_connection_method_changed, indicatoron=True).grid(row=0, column=2, sticky=tk.W, padx=5)
         
         # Connection parameters
         self.params_frame = ttk.LabelFrame(conn_frame, text="Connection Parameters")
@@ -130,7 +131,7 @@ class MeshtasticGUI:
         
         self.scan_btn = ttk.Button(button_frame, text="Scan BLE Devices", 
                                   command=self.scan_ble_devices)
-        self.scan_btn.pack(side=tk.LEFT, padx=5)
+        # Don't pack initially - will be shown/hidden by on_connection_method_changed()
         
         self.connect_btn = ttk.Button(button_frame, text="Connect", 
                                      command=self.connect_device)
@@ -141,10 +142,10 @@ class MeshtasticGUI:
         self.disconnect_btn.pack(side=tk.LEFT, padx=5)
         
         # Connection status and info
-        info_frame = ttk.LabelFrame(conn_frame, text="Device Information")
+        info_frame = ttk.LabelFrame(conn_frame, text="Connected Device Information")
         info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        self.device_info = scrolledtext.ScrolledText(info_frame, height=10)
+        self.device_info = scrolledtext.ScrolledText(info_frame, height=10, bg='black', fg='green', insertbackground='green')
         self.device_info.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
     def create_nodes_tab(self):
@@ -176,20 +177,22 @@ class MeshtasticGUI:
         self.list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         # Treeview for nodes
-        self.nodes_tree = ttk.Treeview(self.list_frame, columns=("id", "name", "distance", "snr", "battery"), 
+        self.nodes_tree = ttk.Treeview(self.list_frame, columns=("node", "id", "name", "distance", "snr", "battery"), 
                                       show="tree headings")
         
-        self.nodes_tree.heading("#0", text="Node")
-        self.nodes_tree.heading("id", text="ID")
-        self.nodes_tree.heading("name", text="Name")
+        self.nodes_tree.heading("#0", text="⭐")
+        self.nodes_tree.heading("node", text="Short Name")
+        self.nodes_tree.heading("id", text="Node ID")
+        self.nodes_tree.heading("name", text="Long Name")
         self.nodes_tree.heading("distance", text="Distance")
         self.nodes_tree.heading("snr", text="SNR")
         self.nodes_tree.heading("battery", text="Battery")
         
         # Configure column widths
-        self.nodes_tree.column("#0", width=100)
-        self.nodes_tree.column("id", width=100)
-        self.nodes_tree.column("name", width=150)
+        self.nodes_tree.column("#0", width=20)
+        self.nodes_tree.column("node", width=37, anchor="center")
+        self.nodes_tree.column("id", width=75, anchor="center")
+        self.nodes_tree.column("name", width=238)
         self.nodes_tree.column("distance", width=80)
         self.nodes_tree.column("snr", width=60)
         self.nodes_tree.column("battery", width=80)
@@ -203,7 +206,7 @@ class MeshtasticGUI:
         self.nodes_tree.configure(yscrollcommand=scrollbar.set)
         
         # Bind column header clicks for sorting
-        for col in ("#0", "id", "name", "distance", "snr", "battery"):
+        for col in ("#0", "node", "id", "name", "distance", "snr", "battery"):
             self.nodes_tree.heading(col, command=lambda c=col: self.sort_nodes_by_column(c))
         
         # Node actions
@@ -214,6 +217,8 @@ class MeshtasticGUI:
                   command=self.refresh_nodes).pack(side=tk.LEFT, padx=5)
         ttk.Button(actions_frame, text="Ping Node", 
                   command=self.ping_node).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions_frame, text="Favorite Node", 
+                  command=self.favorite_node_node).pack(side=tk.LEFT, padx=5)
         ttk.Button(actions_frame, text="Traceroute", 
                   command=self.traceroute_node).pack(side=tk.LEFT, padx=5)
         ttk.Button(actions_frame, text="Message", 
@@ -222,6 +227,8 @@ class MeshtasticGUI:
                   command=self.request_position).pack(side=tk.LEFT, padx=5)
         ttk.Button(actions_frame, text="Request Telemetry", 
                   command=self.request_telemetry).pack(side=tk.LEFT, padx=5)
+        ttk.Button(actions_frame, text="Remove Node", 
+                  command=self.remove_node).pack(side=tk.LEFT, padx=5)
         
     def create_messages_tab(self):
         """Create the messaging tab"""
@@ -249,7 +256,7 @@ class MeshtasticGUI:
         history_frame = ttk.LabelFrame(message_area_frame, text="Message History")
         history_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        self.message_history = scrolledtext.ScrolledText(history_frame, state=tk.DISABLED)
+        self.message_history = scrolledtext.ScrolledText(history_frame, state=tk.DISABLED, bg='black', fg='green', insertbackground='green')
         self.message_history.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Message composition
@@ -310,8 +317,6 @@ class MeshtasticGUI:
         sections_frame = ttk.Frame(main_content_frame)
         sections_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10), pady=5)
         
-        ttk.Label(sections_frame, text="Configuration Sections", 
-                 font=("TkDefaultFont", 10, "bold")).pack(pady=5)
         
         self.config_sections = tk.Listbox(sections_frame, width=20)
         self.config_sections.pack(fill=tk.Y, expand=True)
@@ -341,7 +346,7 @@ class MeshtasticGUI:
             self.config_sections.insert(tk.END, section_name)
         
         # Configuration details
-        details_frame = ttk.LabelFrame(main_content_frame, text="Configuration Details")
+        details_frame = ttk.LabelFrame(main_content_frame, text="Configuration Settings")
         details_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, pady=5)
         
         # Create scrollable frame for config fields
@@ -370,10 +375,10 @@ class MeshtasticGUI:
     def create_monitor_tab(self):
         """Create the Monitor tab for tx/rx activity and CLI commands"""
         monitor_frame = ttk.Frame(self.notebook)
-        self.notebook.add(monitor_frame, text="Monitor")
+        self.notebook.add(monitor_frame, text="Console")
         
         # Activity console
-        console_frame = ttk.LabelFrame(monitor_frame, text="TX/RX Activity Console")
+        console_frame = ttk.LabelFrame(monitor_frame, text="Console Output")
         console_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
         self.monitor_console = scrolledtext.ScrolledText(
@@ -382,7 +387,7 @@ class MeshtasticGUI:
             wrap=tk.WORD,
             bg='black',
             fg='green',
-            font=('Courier', 9)
+            font=('Courier', 14)
         )
         self.monitor_console.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -399,7 +404,7 @@ class MeshtasticGUI:
         self.cli_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.cli_entry.bind('<Return>', self.execute_cli_command)
         
-        ttk.Button(input_frame, text="Execute", 
+        ttk.Button(input_frame, text="Send", 
                   command=self.execute_cli_command).pack(side=tk.LEFT, padx=5)
         
         # Export button
@@ -408,14 +413,26 @@ class MeshtasticGUI:
         
         ttk.Button(export_frame, text="Export Console History", 
                   command=self.export_console_history).pack(side=tk.LEFT, padx=5)
+        ttk.Button(export_frame, text="Export Raw Packets", 
+                  command=self.export_raw_packets).pack(side=tk.LEFT, padx=5)
         ttk.Button(export_frame, text="Clear Console", 
                   command=self.clear_console).pack(side=tk.LEFT, padx=5)
+        ttk.Button(export_frame, text="Help", 
+                  command=self.show_help).pack(side=tk.LEFT, padx=5)
         
         # Initialize monitor data
         self.monitor_data = []
+        self.raw_packet_data = []  # Store raw packet data for export
         
         # Log initial message
         self.add_monitor_message("Monitor console initialized", "SYSTEM")
+        
+        # Redirect stdout/stderr to capture all prints
+        import sys
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        sys.stdout = self
+        sys.stderr = self
     
     def create_status_bar(self):
         """Create the status bar"""
@@ -436,27 +453,59 @@ class MeshtasticGUI:
         
     def setup_pubsub(self):
         """Setup PubSub event handlers"""
+        # Primary subscription to all received packets
         pub.subscribe(self.on_receive, "meshtastic.receive")
         pub.subscribe(self.on_connection, "meshtastic.connection")
         pub.subscribe(self.on_connection, "meshtastic.connection.established") 
         pub.subscribe(self.on_node_updated, "meshtastic.node.updated")
         
-        # Subscribe to all packet types for monitor console
-        pub.subscribe(self.on_packet_monitor, "meshtastic.receive")
+        # Subscribe to all packet types for monitor console (remove duplicate receive subscription)
         pub.subscribe(self.on_packet_monitor, "meshtastic.send")
         
-        # Also subscribe to specific protocol handlers if needed
+        # Subscribe to text message specific events
+        pub.subscribe(self.on_text_message, "meshtastic.receive.text")
+        pub.subscribe(self.on_text_message, "meshtastic.receive.data.TEXT_MESSAGE_APP")
+        
+        # Subscribe to Store & Forward messages for message history
         try:
-            pub.subscribe(self.on_receive, "meshtastic.receive.text")
-            pub.subscribe(self.on_receive, "meshtastic.receive.data.TEXT_MESSAGE_APP")
-            pub.subscribe(self.on_packet_monitor, "meshtastic.receive.position")
-            pub.subscribe(self.on_packet_monitor, "meshtastic.receive.telemetry")
+            pub.subscribe(self.on_store_forward_message, "meshtastic.receive.data.STORE_FORWARD_APP")
         except:
-            # These might not exist in all versions
             pass
+        
+        # Note: RX packets are handled in on_receive method to avoid duplicates
         
         print("PubSub subscriptions set up")  # Debug
         self.add_monitor_message("PubSub subscriptions initialized", "SYSTEM")
+    
+    def on_text_message(self, packet, interface):
+        """Handle specific text message events"""
+        try:
+            print(f"Text message event received: {packet}")
+            
+            # Extract text from the packet
+            text = ""
+            if isinstance(packet, dict):
+                text = packet.get('text', '')
+                from_id = packet.get('from', packet.get('fromId', 'Unknown'))
+                to_id = packet.get('to', packet.get('toId', 'Unknown'))
+            else:
+                # Handle if packet is a text string directly
+                text = str(packet) if packet else ""
+                from_id = "Unknown"
+                to_id = "Unknown"
+            
+            if text:
+                sender_name = self.get_node_display_name(from_id)
+                timestamp = time.strftime('%H:%M:%S')
+                msg_text = f"[{timestamp}] Text from {sender_name} ({from_id}): {text}\n"
+                
+                self.root.after(0, lambda t=msg_text, f=from_id: self.add_message_to_history(t, f))
+                self.root.after(0, lambda: self.add_monitor_message(f"TEXT: {text} from {sender_name}", "RX"))
+                
+        except Exception as e:
+            print(f"Error in on_text_message: {e}")
+            import traceback
+            traceback.print_exc()
     
     def setup_styles(self):
         """Setup consistent UI styles"""
@@ -474,16 +523,28 @@ class MeshtasticGUI:
             print(f"Received packet: {packet}")  # Debug print
             
             # Handle different packet formats
-            decoded = packet.get('decoded')
+            decoded = packet.get('decoded', {})
+            
+            # Also check if this is an encrypted message that needs special handling
+            is_pki_encrypted = packet.get('pki_encrypted', False)
+            if is_pki_encrypted:
+                print(f"PKI encrypted message detected - checking for decrypted text")  # Debug print
+            
             if decoded:
                 portnum = decoded.get('portnum')
                 print(f"Portnum: {portnum}")  # Debug print
                 
-                # Check for text messages using both string and enum comparison
-                if (portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP or 
-                    portnum == 'TEXT_MESSAGE_APP' or
-                    str(portnum) == str(portnums_pb2.PortNum.TEXT_MESSAGE_APP)):
-                    
+                # Check for text messages - handle both string and numeric portnums
+                is_text_message = False
+                if portnum == 'TEXT_MESSAGE_APP':
+                    is_text_message = True
+                elif hasattr(portnums_pb2.PortNum, 'TEXT_MESSAGE_APP'):
+                    if portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
+                        is_text_message = True
+                elif isinstance(portnum, int) and portnum == 1:  # TEXT_MESSAGE_APP is typically port 1
+                    is_text_message = True
+                
+                if is_text_message:
                     # Try different methods to get the text
                     text = None
                     if 'text' in decoded:
@@ -499,32 +560,110 @@ class MeshtasticGUI:
                         except:
                             pass
                     
-                    from_id = packet.get('from')
-                    to_id = packet.get('to')
+                    # Use the correct ID fields
+                    from_id = packet.get('fromId') or packet.get('from')
+                    to_id = packet.get('toId') or packet.get('to')
+                    my_node_id = None
+                    
+                    # Get our node ID to check if message is directed to us
+                    try:
+                        if self.interface:
+                            my_info = self.interface.getMyNodeInfo()
+                            if my_info:
+                                my_node_id = my_info.get('num')
+                    except:
+                        pass
                     
                     if text:
-                        print(f"Received text message from {from_id}: {text}")  # Debug print
+                        print(f"Received text message from {from_id} to {to_id}: {text}")  # Debug print
                         
-                        # Get sender name if available
-                        sender_name = self.get_node_display_name(from_id)
+                        # Check if this message is for us or broadcast
+                        # Get our device's node ID in both formats
+                        my_node_id = self.interface.myInfo.my_node_num if self.interface and self.interface.myInfo else None
+                        my_node_hex = f"!{my_node_id:08x}" if my_node_id else None
                         
-                        # Add to message history
-                        timestamp = time.strftime('%H:%M:%S')
-                        msg_text = f"[{timestamp}] From {sender_name} ({from_id}): {text}\n"
+                        is_for_us = (to_id == my_node_id or to_id == my_node_hex or 
+                                   to_id == BROADCAST_ADDR or
+                                   str(to_id) == str(BROADCAST_ADDR) or
+                                   str(to_id) == "4294967295")  # Broadcast as decimal
                         
-                        self.root.after(0, lambda t=msg_text, f=from_id: self.add_message_to_history(t, f))
-                        
-                        # Add to monitor console
-                        self.root.after(0, lambda: self.add_monitor_message(f"RX: {text} from {sender_name} ({from_id})", "RX"))
-                        
-                        # Also show a notification in status bar
-                        self.root.after(0, lambda s=sender_name: self.update_status(f"Message received from {s}"))
+                        if is_for_us:
+                            # Get sender name if available
+                            sender_name = self.get_node_display_name(from_id)
+                            
+                            # Add to message history
+                            timestamp = time.strftime('%H:%M:%S')
+                            is_broadcast = (to_id == BROADCAST_ADDR or 
+                                          str(to_id) == str(BROADCAST_ADDR) or
+                                          str(to_id) == "4294967295")
+                            dest_text = "Broadcast" if is_broadcast else "You"
+                            
+                            # Add PKI encryption indicator if applicable
+                            encryption_indicator = " [PKI]" if is_pki_encrypted else ""
+                            msg_text = f"[{timestamp}] From {sender_name} ({from_id}) to {dest_text}: {text}{encryption_indicator}\n"
+                            
+                            self.root.after(0, lambda t=msg_text, f=from_id, b=is_broadcast: self.add_message_to_history(t, f, b))
+                            
+                            # Add to monitor console
+                            self.root.after(0, lambda: self.add_monitor_message(f"{text} from {sender_name} ({from_id})", "RX"))
+                            
+                            # Also show a notification in status bar
+                            self.root.after(0, lambda s=sender_name: self.update_status(f"Message received from {s}"))
+                        else:
+                            print(f"Message not for us (from {from_id} to {to_id})")
                     else:
                         print(f"Text message packet but no text found: {decoded}")
                 else:
                     print(f"Non-text message received, portnum: {portnum}")  # Debug print
+            # Handle PKI encrypted messages without decoded text
+            elif is_pki_encrypted:
+                # This is an encrypted message - try to handle it even without decrypted content
+                from_id = packet.get('fromId') or packet.get('from')
+                to_id = packet.get('toId') or packet.get('to')
+                my_node_id = None
+                
+                # Get our node ID to check if message is directed to us
+                try:
+                    if self.interface:
+                        my_info = self.interface.getMyNodeInfo()
+                        if my_info:
+                            my_node_id = my_info.get('num')
+                except:
+                    pass
+                
+                # Check if this encrypted message is for us
+                is_for_us = (to_id == my_node_id or 
+                           to_id == BROADCAST_ADDR or
+                           str(to_id) == str(BROADCAST_ADDR) or
+                                                      str(to_id) == "4294967295")
+                
+                if is_for_us:
+                    sender_name = self.get_node_display_name(from_id)
+                    timestamp = time.strftime('%H:%M:%S')
+                    
+                    # Check for any decrypted payload that might be available
+                    text_content = "Encrypted message (could not decrypt)"
+                    
+                    # Try to get text from alternate sources in the packet
+                    if 'text' in packet:
+                        text_content = packet['text']
+                    elif 'decoded' in packet and 'text' in packet['decoded']:
+                        text_content = packet['decoded']['text']
+                    
+                    is_broadcast = (to_id == BROADCAST_ADDR or 
+                                  str(to_id) == str(BROADCAST_ADDR) or
+                                                                    str(to_id) == "4294967295")
+                    dest_text = "Broadcast" if is_broadcast else "You"
+                    
+                    msg_text = f"[{timestamp}] From {sender_name} ({from_id}) to {dest_text}: {text_content} [PKI]\n"
+                    
+                    self.root.after(0, lambda t=msg_text, f=from_id, b=is_broadcast: self.add_message_to_history(t, f, b))
+                    print(f"Processed PKI encrypted message from {from_id} to {to_id}")  # Debug print
             else:
                 print("Packet has no decoded data")  # Debug print
+            
+            # Add to console monitor (moved from on_packet_monitor to avoid duplicates)
+            self.add_packet_to_console_monitor(packet, interface, "RX")
                 
         except Exception as e:
             logging.error(f"Error processing received packet: {e}")
@@ -533,37 +672,141 @@ class MeshtasticGUI:
             traceback.print_exc()
     
     def on_packet_monitor(self, packet, interface):
-        """Handle all packets for monitor console"""
+        """Handle TX packets for monitor console"""
         try:
-            # Simple direction detection based on packet structure
-            direction = "RX"
+            # This only handles TX (send) packets now
+            self.add_packet_to_console_monitor(packet, interface, "TX")
             
-            # Extract basic packet info
-            from_id = getattr(packet, 'fromId', getattr(packet, 'from', 'Unknown'))
-            to_id = getattr(packet, 'toId', getattr(packet, 'to', 'Unknown'))
-            packet_id = getattr(packet, 'id', 'N/A')
+            # Extract basic packet info - packet is a dictionary
+            from_id = packet.get('fromId', packet.get('from', 'Unknown'))
+            to_id = packet.get('toId', packet.get('to', 'Unknown'))
+            packet_id = packet.get('id', 'N/A')
             
-            # Get packet type/portnum
-            decoded = getattr(packet, 'decoded', None)
+            # Get packet type/portnum from decoded section
+            decoded = packet.get('decoded', {})
             if decoded:
-                portnum = getattr(decoded, 'portnum', 'Unknown')
+                portnum = decoded.get('portnum', 'Unknown')
                 payload_info = f"portnum={portnum}"
                 
                 # Add payload details if available
-                if hasattr(decoded, 'payload'):
-                    payload_size = len(decoded.payload) if decoded.payload else 0
+                payload = decoded.get('payload')
+                if payload:
+                    payload_size = len(payload) if isinstance(payload, bytes) else len(str(payload))
                     payload_info += f", size={payload_size}B"
+                
+                # Add specific content info based on portnum
+                if portnum == 'POSITION_APP' and 'position' in decoded:
+                    pos = decoded['position']
+                    if 'latitude' in pos and 'longitude' in pos:
+                        payload_info += f", lat={pos['latitude']:.4f}, lon={pos['longitude']:.4f}"
+                        if 'altitude' in pos:
+                            payload_info += f", alt={pos['altitude']}m"
+                elif portnum == 'TELEMETRY_APP' and 'telemetry' in decoded:
+                    telem = decoded['telemetry']
+                    if 'deviceMetrics' in telem:
+                        metrics = telem['deviceMetrics']
+                        if 'batteryLevel' in metrics:
+                            battery_level = min(100, max(0, round(metrics['batteryLevel'])))
+                            payload_info += f", bat={battery_level}%"
+                        if 'voltage' in metrics:
+                            payload_info += f", v={metrics['voltage']:.2f}V"
+                elif portnum == 'TEXT_MESSAGE_APP' and 'text' in decoded:
+                    text = decoded['text'][:50] + ("..." if len(decoded['text']) > 50 else "")
+                    payload_info += f", text=\"{text}\""
+                elif portnum == 'NODEINFO_APP' and 'user' in decoded:
+                    user = decoded['user']
+                    if 'longName' in user:
+                        payload_info += f", user=\"{user['longName']}\""
             else:
                 payload_info = "encrypted/unknown"
             
-            # Format monitor message
-            msg = f"Packet ID:{packet_id} {from_id}→{to_id} ({payload_info})"
-            self.root.after(0, lambda: self.add_monitor_message(msg, direction))
+            # Format monitor message with node names when possible
+            from_name = self.get_node_display_name(from_id) if from_id != 'Unknown' else from_id
+            to_name = self.get_node_display_name(to_id) if to_id != 'Unknown' else to_id
+            
+            msg = f"Packet ID:{packet_id} {from_name}→{to_name} ({payload_info})"
+            self.root.after(0, lambda msg=msg, direction=direction: self.add_monitor_message(msg, direction))
             
         except Exception as e:
             print(f"Error in packet monitor: {e}")
+            import traceback
+            traceback.print_exc()
     
-    def on_connection(self, interface, topic):
+    def add_packet_to_console_monitor(self, packet, interface, direction):
+        """Add packet to console monitor (consolidated from on_packet_monitor)"""
+        try:
+            # Store raw packet data for export
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            raw_packet_entry = {
+                'timestamp': timestamp,
+                'packet': packet,
+                'interface_type': interface.__class__.__name__ if interface else 'Unknown'
+            }
+            self.raw_packet_data.append(raw_packet_entry)
+            
+            # Extract basic packet info - packet is a dictionary
+            from_id = packet.get('fromId', packet.get('from', 'Unknown'))
+            to_id = packet.get('toId', packet.get('to', 'Unknown'))
+            packet_id = packet.get('id', 'N/A')
+            
+            # Get packet type/portnum from decoded section
+            decoded = packet.get('decoded', {})
+            if decoded:
+                portnum = decoded.get('portnum', 'Unknown')
+                payload_info = f"portnum={portnum}"
+                
+                # Add payload details if available
+                payload = decoded.get('payload')
+                if payload:
+                    payload_size = len(payload) if isinstance(payload, bytes) else len(str(payload))
+                    payload_info += f", size={payload_size}B"
+                
+                # Add specific packet type information
+                if 'text' in decoded:
+                    payload_info += f", text=\"{decoded['text']}\""
+                elif portnum == 'POSITION_APP' or portnum == 3:
+                    # Position packet
+                    if 'position' in decoded:
+                        pos = decoded['position']
+                        lat = pos.get('latitude', pos.get('latitudeI', 0))
+                        lon = pos.get('longitude', pos.get('longitudeI', 0)) 
+                        alt = pos.get('altitude', 0)
+                        if lat != 0 or lon != 0:
+                            if lat > 1000000:  # Integer format (degrees * 1e7)
+                                lat = lat / 1e7
+                                lon = lon / 1e7
+                            payload_info += f", lat={lat:.4f}, lon={lon:.4f}, alt={alt}m"
+                elif portnum == 'TELEMETRY_APP' or portnum == 67:
+                    # Telemetry packet
+                    if 'telemetry' in decoded:
+                        telem = decoded['telemetry']
+                        if 'deviceMetrics' in telem:
+                            dm = telem['deviceMetrics']
+                            if 'batteryLevel' in dm and 'voltage' in dm:
+                                battery_level = min(100, max(0, round(dm['batteryLevel'])))
+                                payload_info += f", bat={battery_level}%, v={dm['voltage']:.2f}V"
+                elif portnum == 'NODEINFO_APP' or portnum == 4:
+                    # Node info packet
+                    if 'user' in decoded:
+                        user = decoded['user']
+                        if 'longName' in user:
+                            payload_info += f", user=\"{user['longName']}\""
+            else:
+                payload_info = "encrypted/unknown"
+            
+            # Format monitor message with node names when possible
+            from_name = self.get_node_display_name(from_id) if from_id != 'Unknown' else from_id
+            to_name = self.get_node_display_name(to_id) if to_id != 'Unknown' else to_id
+            
+            msg = f"{direction}: Packet ID:{packet_id} {from_name}→{to_name} ({payload_info})"
+            self.root.after(0, lambda: self.add_monitor_message(msg, direction))
+            
+        except Exception as e:
+            print(f"Error in add_packet_to_console_monitor: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_connection(self, interface, topic=None):
         """Handle connection events"""
         self.root.after(0, self.update_connection_status)
     
@@ -571,10 +814,12 @@ class MeshtasticGUI:
         """Handle node updates"""
         self.root.after(0, self.refresh_nodes)
     
-    def add_message_to_history(self, message, node_id=None):
+    def add_message_to_history(self, message, node_id=None, is_broadcast=False):
         """Add message to history display and active chats"""
-        # Add to active chats if node_id is provided
-        if node_id:
+        # Route broadcast messages to ^all chat
+        if is_broadcast:
+            self.add_to_active_chats('^all', message)
+        elif node_id:
             self.add_to_active_chats(node_id, message)
         
         # Only update main history if no specific chat is selected or if it matches current selection
@@ -706,6 +951,34 @@ class MeshtasticGUI:
                     info += f"Long Name: {user_name}\n"
                     info += f"Short Name: {short_name}\n"
                     
+                    # Firmware version from multiple sources
+                    firmware_version = None
+                    
+                    try:
+                        # Try firmware_version (underscore format from CLI)
+                        if hasattr(self.interface, 'myInfo') and self.interface.myInfo:
+                            if hasattr(self.interface.myInfo, 'metadata') and self.interface.myInfo.metadata:
+                                firmware_version = getattr(self.interface.myInfo.metadata, 'firmware_version', None)
+                        
+                        # Try firmwareVersion (camelCase format)  
+                        if not firmware_version and hasattr(self.interface, 'myInfo') and self.interface.myInfo:
+                            if hasattr(self.interface.myInfo, 'metadata') and self.interface.myInfo.metadata:
+                                firmware_version = getattr(self.interface.myInfo.metadata, 'firmwareVersion', None)
+                        
+                        # Try direct interface metadata
+                        if not firmware_version and hasattr(self.interface, 'metadata') and self.interface.metadata:
+                            firmware_version = getattr(self.interface.metadata, 'firmware_version', None) or getattr(self.interface.metadata, 'firmwareVersion', None)
+                        
+                    except Exception as e:
+                        print(f"Error getting firmware version: {e}")
+                        firmware_version = None
+                    
+                    # Display firmware version if found
+                    if firmware_version:
+                        info += f"Firmware Version: {firmware_version}\n"
+                    else:
+                        info += f"Firmware Version: N/A\n"
+                    
                     # Hardware model information
                     if 'hwModel' in user_info:
                         info += f"Hardware Model: {user_info['hwModel']}\n"
@@ -720,7 +993,8 @@ class MeshtasticGUI:
                     if device_metrics:
                         info += f"\n=== Device Metrics ===\n"
                         if 'batteryLevel' in device_metrics:
-                            info += f"Battery Level: {device_metrics['batteryLevel']}%\n"
+                            battery_level = min(100, max(0, round(device_metrics['batteryLevel'])))
+                            info += f"Battery Level: {battery_level}%\n"
                         if 'voltage' in device_metrics:
                             info += f"Voltage: {device_metrics['voltage']:.2f}V\n"
                         if 'channelUtilization' in device_metrics:
@@ -735,16 +1009,57 @@ class MeshtasticGUI:
                     
                     # Position information
                     position = my_info.get('position', {})
-                    if position:
-                        info += f"\n=== Position ===\n"
-                        if 'latitude' in position:
-                            info += f"Latitude: {position['latitude']:.6f}\n"
-                        if 'longitude' in position:
-                            info += f"Longitude: {position['longitude']:.6f}\n"
-                        if 'altitude' in position:
-                            info += f"Altitude: {position['altitude']}m\n"
-                        if 'satsInView' in position:
-                            info += f"Satellites in View: {position['satsInView']}\n"
+                    info += f"\n=== Position ===\n"
+                    
+                    # Check both current position and fixed position config
+                    has_position = False
+                    lat_val = None
+                    lon_val = None 
+                    alt_val = None
+                    
+                    # First try to get from current position
+                    if position and 'latitude' in position:
+                        lat_val = position['latitude']
+                        has_position = True
+                    if position and 'longitude' in position:
+                        lon_val = position['longitude'] 
+                        has_position = True
+                    if position and 'altitude' in position:
+                        alt_val = position['altitude']
+                    
+                    # If no current position, try to get from fixed position in config
+                    if not has_position:
+                        try:
+                            local_node = self.interface.localNode
+                            if hasattr(local_node, 'localConfig') and hasattr(local_node.localConfig, 'position'):
+                                pos_config = local_node.localConfig.position
+                                if hasattr(pos_config, 'fixed_position') and pos_config.fixed_position:
+                                    # Device has fixed position enabled, but we need to check if there's stored position data
+                                    # The actual fixed position coordinates are stored in the device and should appear in position data
+                                    pass
+                        except:
+                            pass
+                    
+                    # Display position information
+                    if lat_val is not None:
+                        info += f"Latitude: {lat_val:.6f}\n"
+                    else:
+                        info += f"Latitude: N/A\n"
+                    
+                    if lon_val is not None:
+                        info += f"Longitude: {lon_val:.6f}\n"
+                    else:
+                        info += f"Longitude: N/A\n"
+                    
+                    if alt_val is not None:
+                        info += f"Altitude: {alt_val}m\n"
+                    else:
+                        info += f"Altitude: N/A\n"
+                        
+                    if position and 'satsInView' in position:
+                        info += f"Satellites in View: {position['satsInView']}\n"
+                    else:
+                        info += f"Satellites in View: N/A\n"
                     
                     # Local node configuration info
                     try:
@@ -850,6 +1165,13 @@ class MeshtasticGUI:
             # Update header with node count
             self.list_frame.config(text=f"Network Nodes ({node_count})")
             
+            # Get local node position for distance calculation
+            local_position = None
+            if self.interface:
+                my_info = self.interface.getMyNodeInfo()
+                if my_info:
+                    local_position = my_info.get('position', {})
+            
             for node_id, node in nodes.items():
                 user = node.get('user', {})
                 name = user.get('longName', 'Unknown')
@@ -860,15 +1182,42 @@ class MeshtasticGUI:
                 if battery_level == '' or battery_level is None:
                     battery_display = 'not available'
                 else:
+                    # Ensure battery level is properly rounded and capped at 100%
+                    battery_level = min(100, max(0, round(battery_level)))
                     battery_display = f"{battery_level}%"
+                
+                # Calculate distance
+                distance_display = ''
+                node_position = node.get('position', {})
+                if (local_position and 'latitude' in local_position and 'longitude' in local_position and
+                    node_position and 'latitude' in node_position and 'longitude' in node_position):
+                    try:
+                        import math
+                        # Haversine formula for distance calculation
+                        lat1, lon1 = math.radians(local_position['latitude']), math.radians(local_position['longitude'])
+                        lat2, lon2 = math.radians(node_position['latitude']), math.radians(node_position['longitude'])
+                        
+                        dlat = lat2 - lat1
+                        dlon = lon2 - lon1
+                        a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+                        c = 2 * math.asin(math.sqrt(a))
+                        distance_km = 6371 * c  # Earth radius in km
+                        
+                        if distance_km < 1:
+                            distance_display = f"{distance_km*1000:.0f}m"
+                        else:
+                            distance_display = f"{distance_km:.1f}km"
+                    except:
+                        distance_display = ''
                 
                 # Add to tree
                 self.nodes_tree.insert('', 'end', 
-                    text=short_name or name,
+                    text='⭐' if node_id in self.favorite_nodes else '',
                     values=(
-                        node_id,
+                        short_name or name,
+                        node_id.lstrip('!'),
                         name,
-                        node.get('position', {}).get('distance', ''),
+                        distance_display,
                         node.get('snr', ''),
                         battery_display
                     ))
@@ -916,7 +1265,16 @@ class MeshtasticGUI:
             elif column == "distance":  # Distance column
                 try:
                     val = values[2] if len(values) > 2 else ""
-                    return float(val) if val and val != "" else float('inf')
+                    if not val or val == "":
+                        return float('inf')
+                    # Parse distance with units (e.g., "1.2km", "500m")
+                    val_str = str(val).lower()
+                    if 'km' in val_str:
+                        return float(val_str.replace('km', '')) * 1000  # Convert to meters for sorting
+                    elif 'm' in val_str:
+                        return float(val_str.replace('m', ''))
+                    else:
+                        return float(val)
                 except (ValueError, TypeError):
                     return float('inf')
             elif column == "snr":  # SNR column
@@ -995,7 +1353,7 @@ class MeshtasticGUI:
             
             # Add to monitor console
             dest_name = self.get_node_display_name(dest)
-            self.add_monitor_message(f"TX: {message} to {dest_name} ({dest})", "TX")
+            self.add_monitor_message(f"{message} to {dest_name} ({dest})", "TX")
             
             # Clear message entry
             self.message_entry.delete(0, tk.END)
@@ -1019,16 +1377,19 @@ class MeshtasticGUI:
         item = self.nodes_tree.item(selected_item)
         values = item['values']
         
-        if not values:
+        if not values or len(values) < 2:
             messagebox.showwarning("Warning", "Invalid node selection")
             return
         
-        node_id = values[0]  # ID is the first value
-        node_name = values[1] if len(values) > 1 else "Unknown"  # Name is the second value
+        node_id = values[1]  # Node ID is the second value (after column reorder)
+        node_name = values[0]  # Short Name is the first value
+        
+        # Add back the ! prefix that was stripped for display
+        node_id_with_prefix = f"!{node_id}"
         
         try:
             # Send ping message
-            self.interface.sendText("ping", node_id)
+            self.interface.sendText("ping", node_id_with_prefix)
             
             # Add to message history
             timestamp = time.strftime('%H:%M:%S')
@@ -1056,12 +1417,15 @@ class MeshtasticGUI:
         item = self.nodes_tree.item(selected_item)
         values = item['values']
         
-        if not values:
+        if not values or len(values) < 2:
             messagebox.showwarning("Warning", "Invalid node selection")
             return
         
-        node_id = values[0]  # ID is the first value
-        node_name = values[1] if len(values) > 1 else "Unknown"  # Name is the second value
+        node_id = values[1]  # Node ID is the second value (after column reorder)
+        node_name = values[0]  # Short Name is the first value
+        
+        # Add back the ! prefix that was stripped for display
+        node_id_with_prefix = f"!{node_id}"
         
         # Show progress dialog
         progress_window = tk.Toplevel(self.root)
@@ -1077,67 +1441,195 @@ class MeshtasticGUI:
         
         def run_traceroute():
             try:
-                # Store traceroute responses
-                traceroute_responses = []
+                # Store traceroute results
+                traceroute_results = []
                 traceroute_complete = threading.Event()
                 
-                def on_traceroute_response(packet, interface):
-                    """Handle traceroute response packets"""
-                    try:
-                        decoded = packet.get('decoded')
-                        if decoded and decoded.get('portnum') == portnums_pb2.PortNum.TRACEROUTE_APP:
-                            route_data = decoded.get('routeDiscovery', {})
-                            route = route_data.get('route', [])
-                            
-                            # Process route information
-                            for hop_num, hop_id in enumerate(route, 1):
-                                hop_name = self.get_node_display_name(hop_id)
-                                traceroute_responses.append({
-                                    'hop': hop_num,
-                                    'node_id': hop_id,
-                                    'node_name': hop_name,
-                                    'snr': route_data.get('snr', 0) if hop_num == len(route) else 0
-                                })
-                            
-                            traceroute_complete.set()
-                    except Exception as e:
-                        print(f"Error processing traceroute response: {e}")
+                # Store original response handler
+                original_response_handler = None
+                if hasattr(self.interface, 'onResponseTraceRoute'):
+                    original_response_handler = self.interface.onResponseTraceRoute
                 
-                # Subscribe to traceroute responses
-                pub.subscribe(on_traceroute_response, "meshtastic.receive")
+                def custom_traceroute_handler(p: dict):
+                    """Custom traceroute response handler"""
+                    try:
+                        import google.protobuf.json_format
+                        from meshtastic.protobuf import mesh_pb2
+                        
+                        UNK_SNR = -128  # Value representing unknown SNR
+                        
+                        # Parse the route discovery data
+                        routeDiscovery = mesh_pb2.RouteDiscovery()
+                        routeDiscovery.ParseFromString(p["decoded"]["payload"])
+                        asDict = google.protobuf.json_format.MessageToDict(routeDiscovery)
+                        
+                        print(f"Received traceroute response: {asDict}")  # Debug
+                        
+                        # Build route information
+                        route_info = {
+                            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'destination': self.interface._nodeNumToId(p["to"], False) or f"{p['to']:08x}",
+                            'origin': self.interface._nodeNumToId(p["from"], False) or f"{p['from']:08x}",
+                            'hops_forward': [],
+                            'hops_back': []
+                        }
+                        
+                        # Process forward route (towards destination)
+                        if "route" in asDict:
+                            route_forward = asDict["route"]
+                            snr_towards = asDict.get("snrTowards", [])
+                            
+                            for idx, nodeNum in enumerate(route_forward):
+                                node_id = self.interface._nodeNumToId(nodeNum, False) or f"{nodeNum:08x}"
+                                node_name = self.get_node_display_name(node_id)
+                                snr = None
+                                if idx < len(snr_towards) and snr_towards[idx] != UNK_SNR:
+                                    snr = snr_towards[idx] / 4  # SNR is stored as 4x actual value
+                                
+                                route_info['hops_forward'].append({
+                                    'hop': idx + 1,
+                                    'node_id': node_id,
+                                    'node_name': node_name,
+                                    'snr': snr
+                                })
+                        
+                        # Process return route (back to us)
+                        if "routeBack" in asDict:
+                            route_back = asDict["routeBack"]
+                            snr_back = asDict.get("snrBack", [])
+                            
+                            for idx, nodeNum in enumerate(route_back):
+                                node_id = self.interface._nodeNumToId(nodeNum, False) or f"{nodeNum:08x}"
+                                node_name = self.get_node_display_name(node_id)
+                                snr = None
+                                if idx < len(snr_back) and snr_back[idx] != UNK_SNR:
+                                    snr = snr_back[idx] / 4
+                                
+                                route_info['hops_back'].append({
+                                    'hop': idx + 1,
+                                    'node_id': node_id,
+                                    'node_name': node_name,
+                                    'snr': snr
+                                })
+                        
+                        traceroute_results.append(route_info)
+                        traceroute_complete.set()
+                        
+                        # Also call original handler for console output
+                        if original_response_handler:
+                            original_response_handler(p)
+                            
+                    except Exception as e:
+                        print(f"Error in custom traceroute handler: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        traceroute_complete.set()
+                
+                # Replace the response handler temporarily
+                self.interface.onResponseTraceRoute = custom_traceroute_handler
                 
                 # Send the actual traceroute request
                 try:
                     print(f"Sending traceroute to {node_id}")
                     # Convert hex node_id to decimal
-                    dest_id = int(node_id.replace('!', ''), 16)
-                    self.interface.sendTraceRoute(dest_id)
+                    dest_id = int(node_id_with_prefix.replace('!', ''), 16)
+                    # Use appropriate hop limit (7 is common default)
+                    hop_limit = 7
+                    
+                    # Send traceroute directly without built-in timeout to avoid premature timeout
+                    from meshtastic.protobuf import mesh_pb2, portnums_pb2
+                    r = mesh_pb2.RouteDiscovery()
+                    self.interface.sendData(
+                        r,
+                        destinationId=dest_id,
+                        portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                        wantResponse=True,
+                        onResponse=self.interface.onResponseTraceRoute,
+                        channelIndex=0,
+                        hopLimit=hop_limit,
+                    )
+                    
+                    # The traceroute_complete event will be set by our custom handler
+                    print("Traceroute request sent, waiting for response...")
+                    
                 except Exception as e:
                     print(f"Error sending traceroute: {e}")
-                    raise e
+                    # Don't re-raise, just set the completion event so we can handle it gracefully
+                    traceroute_complete.set()
                 
-                # Wait for response with timeout
-                if traceroute_complete.wait(timeout=30):  # 30 second timeout
+                # Wait for response with timeout (the mesh interface has its own timeout too)
+                timeout_seconds = 90  # Increased timeout for multi-hop connections
+                print(f"Waiting for traceroute response (timeout: {timeout_seconds}s)...")
+                if traceroute_complete.wait(timeout=timeout_seconds):
+                    # Restore original response handler
+                    if original_response_handler:
+                        self.interface.onResponseTraceRoute = original_response_handler
+                    
                     # Generate report from real data
-                    timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-                    traceroute_report = f"""Traceroute Report
+                    # Check if we got results from our custom handler
+                    if traceroute_results:
+                        route_info = traceroute_results[0]  # Get the first (should be only) result
+                        timestamp = route_info['timestamp']
+                        
+                        traceroute_report = f"""Traceroute Report
+Generated: {timestamp}
+Target: {node_name} ({node_id})
+Destination: {route_info['destination']}
+Origin: {route_info['origin']}
+
+"""
+                        
+                        # Add forward route information
+                        if route_info['hops_forward']:
+                            traceroute_report += "Route towards destination:\n"
+                            traceroute_report += f"  Start: {route_info['destination']}\n"
+                            for hop_data in route_info['hops_forward']:
+                                snr_text = f" (SNR: {hop_data['snr']:.1f}dB)" if hop_data['snr'] is not None else " (SNR: ?)"
+                                traceroute_report += f"  Hop {hop_data['hop']}: {hop_data['node_id']} ({hop_data['node_name']}){snr_text}\n"
+                            traceroute_report += f"  End: {route_info['origin']}\n\n"
+                        else:
+                            traceroute_report += "Direct connection to destination (no intermediate hops)\n\n"
+                        
+                        # Add return route information
+                        if route_info['hops_back']:
+                            traceroute_report += "Route back to us:\n"
+                            traceroute_report += f"  Start: {route_info['origin']}\n"
+                            for hop_data in route_info['hops_back']:
+                                snr_text = f" (SNR: {hop_data['snr']:.1f}dB)" if hop_data['snr'] is not None else " (SNR: ?)"
+                                traceroute_report += f"  Hop {hop_data['hop']}: {hop_data['node_id']} ({hop_data['node_name']}){snr_text}\n"
+                            traceroute_report += f"  End: {route_info['destination']}\n\n"
+                        
+                        total_forward_hops = len(route_info['hops_forward'])
+                        total_back_hops = len(route_info['hops_back'])
+                        
+                        traceroute_report += f"Traceroute completed successfully.\n"
+                        traceroute_report += f"Forward hops: {total_forward_hops}\n"
+                        traceroute_report += f"Return hops: {total_back_hops}\n"
+                    else:
+                        # No results received - could be timeout from mesh interface or no response
+                        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+                        traceroute_report = f"""Traceroute Report
 Generated: {timestamp}
 Target: {node_name} ({node_id})
 
+Traceroute completed but no route data was received.
+
+This could indicate:
+1. The target node is not reachable via the mesh
+2. The target node doesn't support traceroute functionality  
+3. The target node is using incompatible firmware (requires 2.1.22+)
+4. Network congestion or interference prevented response
+5. The target node is currently offline or in deep sleep
+
+Note: The mesh interface may have its own timeout that occurred first.
+Try selecting a different target node or check mesh connectivity.
 """
-                    
-                    if traceroute_responses:
-                        for hop_data in traceroute_responses:
-                            snr_text = f" (SNR: {hop_data['snr']})" if hop_data['snr'] else ""
-                            traceroute_report += f"Hop {hop_data['hop']}: {hop_data['node_id']} ({hop_data['node_name']}){snr_text}\n"
-                        
-                        traceroute_report += f"\nTraceroute completed successfully.\n"
-                        traceroute_report += f"Total hops: {len(traceroute_responses)}\n"
-                    else:
-                        traceroute_report += "No route data received.\n"
                         
                 else:
-                    # Timeout
+                    # Timeout - restore handler first
+                    if original_response_handler:
+                        self.interface.onResponseTraceRoute = original_response_handler
+                        
                     timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
                     traceroute_report = f"""Traceroute Report
 Generated: {timestamp}
@@ -1145,17 +1637,26 @@ Target: {node_name} ({node_id})
 
 Traceroute timed out after 30 seconds.
 No response received from target node.
+
+This could indicate:
+1. The target node is not reachable
+2. The target node is offline or sleeping
+3. Network congestion or interference
+4. The target node doesn't support traceroute functionality
+5. Incompatible firmware versions
+
+Try again or check if the node is active in the mesh.
 """
-                
-                # Unsubscribe from traceroute responses
-                pub.unsubscribe(on_traceroute_response, "meshtastic.receive")
                 
                 # Close progress window and show results
                 self.root.after(0, lambda: self.show_traceroute_results(progress_window, traceroute_report, node_name, node_id))
                 
             except Exception as e:
-                pub.unsubscribe(on_traceroute_response, "meshtastic.receive")
-                self.root.after(0, lambda: self.show_traceroute_error(progress_window, str(e)))
+                # Ensure handler is restored on error
+                if original_response_handler:
+                    self.interface.onResponseTraceRoute = original_response_handler
+                error_msg = str(e)  # Capture error message in local variable
+                self.root.after(0, lambda: self.show_traceroute_error(progress_window, error_msg))
         
         # Start traceroute in background thread
         threading.Thread(target=run_traceroute, daemon=True).start()
@@ -1188,7 +1689,7 @@ No response received from target node.
             filename = filedialog.asksaveasfilename(
                 defaultextension=".txt",
                 filetypes=[("Text files", "*.txt"), ("JSON files", "*.json"), ("All files", "*.*")],
-                initialname=f"traceroute_{node_name}_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+                initialfile=f"traceroute_{node_name}_{time.strftime('%Y%m%d_%H%M%S')}.txt"
             )
             if filename:
                 try:
@@ -1278,37 +1779,171 @@ No response received from target node.
         item = self.nodes_tree.item(selected_item)
         values = item['values']
         
-        if not values:
+        if not values or len(values) < 2:
             messagebox.showwarning("Warning", "Invalid node selection")
             return
         
-        node_id = values[0]  # ID is the first value
-        node_name = values[1] if len(values) > 1 else "Unknown"  # Name is the second value
+        node_id = values[1]  # Node ID is the second value (after column reorder)
+        node_name = values[0]  # Short Name is the first value
+        
+        # Add back the ! prefix that was stripped for display
+        node_id_with_prefix = f"!{node_id}"
         
         # Switch to Messages tab
         self.notebook.select(2)  # Messages tab is index 2 (0: Connection, 1: Nodes, 2: Messages, 3: Config)
         
         # Set the selected node as destination (find the formatted entry)
         for dest_option in self.dest_combo['values']:
-            if dest_option.startswith(node_id + " - "):
+            if dest_option.startswith(node_id_with_prefix + " - "):
                 self.dest_var.set(dest_option)
                 break
         else:
             # Fallback to just the node ID if formatted version not found
-            self.dest_var.set(node_id)
+            self.dest_var.set(node_id_with_prefix)
         
         # Focus on message entry
         self.message_entry.focus_set()
     
     def request_position(self):
         """Request position from selected node"""
-        # Implementation would go here
-        messagebox.showinfo("Info", "Position request feature not yet implemented")
+        if not self.interface:
+            messagebox.showwarning("Warning", "Not connected to device")
+            return
+        
+        # Get selected node
+        selection = self.nodes_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a node to request position from")
+            return
+        
+        selected_item = selection[0]
+        item = self.nodes_tree.item(selected_item)
+        values = item['values']
+        
+        if not values or len(values) < 2:
+            messagebox.showwarning("Warning", "Invalid node selection")
+            return
+        
+        node_id = values[1]  # Node ID is the second value (after column reorder)
+        
+        # Add back the ! prefix that was stripped for display
+        node_id_with_prefix = f"!{node_id}"
+        
+        try:
+            # Convert hex node_id to decimal
+            dest_id = int(node_id_with_prefix.replace('!', ''), 16)
+            print(f"Sending position request to {node_id} ({dest_id})")
+            
+            self.interface.sendPosition(
+                destinationId=dest_id,
+                wantResponse=True,
+                channelIndex=0,
+            )
+            
+            messagebox.showinfo("Success", f"Position request sent to {node_id}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to send position request: {str(e)}")
     
     def request_telemetry(self):
         """Request telemetry from selected node"""
-        # Implementation would go here
-        messagebox.showinfo("Info", "Telemetry request feature not yet implemented")
+        if not self.interface:
+            messagebox.showwarning("Warning", "Not connected to device")
+            return
+        
+        # Get selected node
+        selection = self.nodes_tree.selection()
+        if not selection:
+            messagebox.showwarning("Warning", "Please select a node to request telemetry from")
+            return
+        
+        selected_item = selection[0]
+        item = self.nodes_tree.item(selected_item)
+        values = item['values']
+        
+        if not values or len(values) < 2:
+            messagebox.showwarning("Warning", "Invalid node selection")
+            return
+        
+        node_id = values[1]  # Node ID is the second value (after column reorder)
+        
+        # Add back the ! prefix that was stripped for display
+        node_id_with_prefix = f"!{node_id}"
+        
+        try:
+            # Convert hex node_id to decimal
+            dest_id = int(node_id_with_prefix.replace('!', ''), 16)
+            print(f"Sending device telemetry request to {node_id} ({dest_id})")
+            
+            self.interface.sendTelemetry(
+                destinationId=dest_id,
+                wantResponse=True,
+                channelIndex=0,
+                telemetryType="device_metrics",
+            )
+            
+            messagebox.showinfo("Success", f"Device telemetry request sent to {node_id}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to send telemetry request: {str(e)}")
+    
+    def remove_node(self):
+        """Remove selected node"""
+        selected = self.nodes_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a node to remove")
+            return
+        
+        item = self.nodes_tree.item(selected[0])
+        node_id = item['values'][0] if item['values'] else None
+        node_name = item['text']
+        
+        if not node_id:
+            messagebox.showwarning("Warning", "Invalid node selected")
+            return
+        
+        # Confirm removal
+        result = messagebox.askyesno("Confirm Removal", 
+                                   f"Remove node '{node_name}' ({node_id}) from the list?\n\n" +
+                                   "Note: This only removes it from the GUI display. " +
+                                   "The node will reappear if it sends packets.")
+        
+        if result:
+            # Remove from tree view
+            self.nodes_tree.delete(selected[0])
+            # Remove from nodes dictionary if present
+            if node_id in self.nodes:
+                del self.nodes[node_id]
+            # Remove from favorites if present
+            if node_id in self.favorite_nodes:
+                self.favorite_nodes.remove(node_id)
+            messagebox.showinfo("Success", f"Node '{node_name}' removed from display")
+
+    def favorite_node_node(self):
+        """Toggle favorite status for selected node"""
+        selected = self.nodes_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "Please select a node to favorite")
+            return
+        
+        item = self.nodes_tree.item(selected[0])
+        node_id = item['values'][0] if item['values'] else None
+        node_name = item['text']
+        
+        if not node_id:
+            messagebox.showwarning("Warning", "Invalid node selected")
+            return
+        
+        # Toggle favorite status
+        if node_id in self.favorite_nodes:
+            self.favorite_nodes.remove(node_id)
+            messagebox.showinfo("Success", f"Removed '{node_name}' from favorites")
+        else:
+            self.favorite_nodes.add(node_id)
+            messagebox.showinfo("Success", f"Added '{node_name}' to favorites")
+        
+        # Refresh display to update favorite indicators
+        self.refresh_nodes()
     
     def on_config_section_select(self, event):
         """Handle configuration section selection"""
@@ -1345,10 +1980,6 @@ No response received from target node.
                 ttk.Label(self.config_fields_frame, text=f"Configuration '{config_type}' not available").pack(pady=10)
                 return
             
-            # Create title
-            title_label = ttk.Label(self.config_fields_frame, text=f"{config_type.title()} Configuration", 
-                                   font=("TkDefaultFont", 12, "bold"))
-            title_label.pack(pady=(0, 10))
             
             # Create fields for each configuration parameter
             self.create_config_fields(config_obj, config_type)
@@ -1395,6 +2026,12 @@ No response received from target node.
                     'field': field,
                     'current_value': current_value
                 }
+        
+        # Add special fields for specific config types
+        if config_type == 'device':
+            self.add_device_special_fields()
+        elif config_type == 'position':
+            self.add_position_special_fields()
     
     def create_config_widget(self, parent, field, current_value):
         """Create appropriate widget for configuration field"""
@@ -1523,11 +2160,26 @@ No response received from target node.
             
             # Update configuration from widgets
             changes_made = False
+            special_changes = {}  # Track special field changes
+            
             for widget_key, widget_info in self.config_widgets.items():
                 if widget_key.startswith(f"{config_type}."):
                     field_name = widget_key.split('.', 1)[1]
                     field = widget_info['field']
                     widget = widget_info['widget']
+                    
+                    # Handle special fields (owner name, position, etc.)
+                    if 'special_type' in widget_info:
+                        special_type = widget_info['special_type']
+                        if hasattr(widget, 'get'):
+                            new_value = widget.get()
+                        elif hasattr(widget, 'var'):
+                            new_value = widget.var.get()
+                        else:
+                            continue
+                            
+                        special_changes[special_type] = new_value
+                        continue
                     
                     # Get new value from widget
                     if hasattr(widget, 'var'):
@@ -1575,7 +2227,10 @@ No response received from target node.
                         changes_made = True
                         print(f"Updated {field_name}: {current_value} -> {converted_value}")
             
-            if changes_made:
+            # Process special field changes
+            special_changes_made = self.process_special_field_changes(special_changes, config_type)
+            
+            if changes_made or special_changes_made:
                 # Write configuration to device
                 print(f"Writing {config_type} configuration to device...")
                 node.writeConfig(config_type)
@@ -1583,6 +2238,10 @@ No response received from target node.
                 
                 # Refresh the display
                 self.load_config_section(config_type)
+                
+                # If position was configured, also refresh device info display
+                if config_type == 'position' and special_changes_made:
+                    self.root.after(2000, self.update_device_info)  # Delay to let device process the change
             else:
                 messagebox.showinfo("Info", "No changes detected")
                 
@@ -1648,6 +2307,31 @@ No response received from target node.
             self.update_status("Not connected")
             self.stats_label.config(text="")
     
+    def update_device_info(self):
+        """Update device information display on Connection tab"""
+        try:
+            if self.interface and hasattr(self, 'device_info_text'):
+                # Force refresh of node info
+                self.interface.localNode.requestInfo()
+                # Schedule device info update after short delay
+                self.root.after(1000, self._refresh_device_info_display)
+        except Exception as e:
+            print(f"Error updating device info: {e}")
+    
+    def _refresh_device_info_display(self):
+        """Internal method to refresh the device info display"""
+        try:
+            if self.interface and hasattr(self, 'device_info_text'):
+                # Get updated device info
+                info = self.get_device_info()
+                # Update the display
+                self.device_info_text.config(state=tk.NORMAL)
+                self.device_info_text.delete('1.0', tk.END)
+                self.device_info_text.insert('1.0', info)
+                self.device_info_text.config(state=tk.DISABLED)
+        except Exception as e:
+            print(f"Error refreshing device info display: {e}")
+    
     def update_device_stats(self):
         """Update device statistics in status bar"""
         if not self.interface:
@@ -1665,7 +2349,7 @@ No response received from target node.
             if my_info:
                 device_metrics = my_info.get('deviceMetrics', {})
                 if 'batteryLevel' in device_metrics:
-                    battery = device_metrics['batteryLevel']
+                    battery = min(100, max(0, round(device_metrics['batteryLevel'])))
                     stats_text += f" | Battery: {battery}%"
                 if 'voltage' in device_metrics:
                     voltage = device_metrics['voltage']
@@ -1691,6 +2375,13 @@ No response received from target node.
         self.ble_device.grid_remove()
         self.tcp_label.grid_remove()
         self.tcp_host.grid_remove()
+        
+        # Hide/show scan BLE button based on connection method
+        if hasattr(self, 'scan_btn'):
+            if method == "ble":
+                self.scan_btn.pack(side=tk.LEFT, padx=5)
+            else:
+                self.scan_btn.pack_forget()
         
         # Show only relevant parameters for selected method
         if method == "serial":
@@ -1774,8 +2465,11 @@ No response received from target node.
                     self.nodes_tree.detach(item_id)
     
     def clear_search(self):
-        """Clear search entry and show all nodes"""
+        """Clear search entry, show all nodes and refresh node list"""
         self.search_entry.delete(0, tk.END)
+        
+        # Refresh the node list
+        self.refresh_nodes()
         
         # Ensure all nodes are visible by reattaching any detached items
         all_items = list(self.nodes_tree.get_children())
@@ -1854,14 +2548,27 @@ No response received from target node.
         
         for node_id in sorted_chats:
             # Get node name for display
-            node_name = "Unknown"
-            try:
-                if self.interface and self.interface.nodes and node_id in self.interface.nodes:
-                    node_info = self.interface.nodes[node_id]
-                    user = node_info.get('user', {})
-                    node_name = user.get('longName', 'Unknown')
-            except:
-                pass
+            if node_id == '^all':
+                node_name = "All Broadcast Messages"
+            else:
+                node_name = "Unknown"
+                try:
+                    if self.interface and self.interface.nodes:
+                        # Try both with and without ! prefix
+                        node_key = None
+                        if node_id in self.interface.nodes:
+                            node_key = node_id
+                        elif f"!{node_id}" in self.interface.nodes:
+                            node_key = f"!{node_id}"
+                        elif node_id.startswith('!') and node_id[1:] in self.interface.nodes:
+                            node_key = node_id[1:]
+                        
+                        if node_key:
+                            node_info = self.interface.nodes[node_key]
+                            user = node_info.get('user', {})
+                            node_name = user.get('longName', 'Unknown')
+                except:
+                    pass
             
             chat_display = f"{node_id} - {node_name}"
             self.active_chats.insert(tk.END, chat_display)
@@ -1876,41 +2583,209 @@ No response received from target node.
             return "Broadcast"
         
         try:
-            if self.interface and self.interface.nodes and node_id in self.interface.nodes:
-                node_info = self.interface.nodes[node_id]
-                user = node_info.get('user', {})
-                return user.get('longName', f'Node {node_id}')
+            if self.interface and self.interface.nodes:
+                # Try both with and without ! prefix
+                node_key = None
+                if node_id in self.interface.nodes:
+                    node_key = node_id
+                elif f"!{node_id}" in self.interface.nodes:
+                    node_key = f"!{node_id}"
+                elif node_id.startswith('!') and node_id[1:] in self.interface.nodes:
+                    node_key = node_id[1:]
+                
+                if node_key:
+                    node_info = self.interface.nodes[node_key]
+                    user = node_info.get('user', {})
+                    return user.get('longName', f'Node {node_id}')
         except:
             pass
         
         return f"Node {node_id}"
     
     def load_message_history_from_device(self):
-        """Load previous message history from connected device"""
+        """Load previous message history from connected device using Store & Forward"""
         if not self.interface:
             return
         
         try:
-            # This is a placeholder implementation
-            # In a real implementation, you would:
-            # 1. Query the device for stored messages
-            # 2. Parse the message log
-            # 3. Populate the active chats with historical messages
+            # Check if Store & Forward is available and enabled
+            local_node = self.interface.localNode
+            if not local_node:
+                logging.info("Local node not available for message history request")
+                return
             
-            # For now, we'll just log that this feature would be implemented
-            logging.info("Message history loading from device - feature placeholder")
+            # Check if store & forward module is configured
+            try:
+                store_forward_config = local_node.moduleConfig.store_forward
+                if not store_forward_config.enabled:
+                    logging.info("Store & Forward module not enabled - skipping message history")
+                    return
+            except:
+                logging.info("Store & Forward module not available - checking alternative history sources")
+                # Try alternative methods if Store & Forward is not available
+                self.load_alternative_message_history()
+                return
             
-            # Example of how this might work:
-            # messages = self.interface.getMessageHistory()  # hypothetical method
-            # for msg in messages:
-            #     timestamp = msg.get('timestamp', '')
-            #     from_id = msg.get('from', '')
-            #     text = msg.get('text', '')
-            #     formatted_msg = f"[{timestamp}] From {from_id}: {text}\n"
-            #     self.add_to_active_chats(from_id, formatted_msg)
+            logging.info("Requesting message history from Store & Forward router...")
+            
+            # Set up response handler for store & forward messages
+            self.setup_store_forward_handler()
+            
+            # Send a CLIENT_HISTORY request to the Store & Forward router
+            self.request_store_forward_history()
             
         except Exception as e:
             logging.error(f"Error loading message history from device: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def setup_store_forward_handler(self):
+        """Setup handler for Store & Forward responses"""
+        try:
+            # Subscribe to Store & Forward messages
+            pub.subscribe(self.on_store_forward_message, "meshtastic.receive.data.STORE_FORWARD_APP")
+        except:
+            pass  # Subscription might already exist or not be available
+    
+    def request_store_forward_history(self):
+        """Request message history from Store & Forward router"""
+        try:
+            from meshtastic.protobuf import storeforward_pb2, portnums_pb2
+            
+            # Create a Store & Forward history request
+            sf_request = storeforward_pb2.StoreAndForward()
+            sf_request.rr = storeforward_pb2.StoreAndForward.RequestResponse.CLIENT_HISTORY
+            
+            # Set up history parameters (request last 50 messages in a 24-hour window)
+            sf_request.history.history_messages = 50  # Number of messages to request
+            sf_request.history.window = 24 * 60 * 60  # 24 hours in seconds
+            sf_request.history.last_request = int(time.time()) - (24 * 60 * 60)  # Start from 24 hours ago
+            
+            # Send the request to broadcast (Store & Forward routers will respond)
+            self.interface.sendData(
+                sf_request,
+                destinationId=BROADCAST_ADDR,
+                portNum=portnums_pb2.PortNum.STORE_FORWARD_APP,
+                wantResponse=False  # We'll get responses via the normal receive path
+            )
+            
+            logging.info("Store & Forward history request sent")
+            self.add_monitor_message("Requested message history from Store & Forward router", "SYSTEM")
+            
+        except Exception as e:
+            logging.error(f"Error requesting Store & Forward history: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_store_forward_message(self, packet, interface):
+        """Handle Store & Forward responses including message history"""
+        try:
+            from meshtastic.protobuf import storeforward_pb2
+            
+            decoded = packet.get('decoded', {})
+            if decoded.get('portnum') != 'STORE_FORWARD_APP':
+                return
+            
+            payload = decoded.get('payload')
+            if not payload:
+                return
+            
+            # Parse Store & Forward message
+            sf_message = storeforward_pb2.StoreAndForward()
+            sf_message.ParseFromString(payload)
+            
+            from_id = packet.get('fromId') or packet.get('from')
+            
+            if sf_message.rr == storeforward_pb2.StoreAndForward.RequestResponse.ROUTER_TEXT_DIRECT:
+                # This is a direct message from history
+                if sf_message.text:
+                    # Decode the stored message
+                    try:
+                        message_text = sf_message.text.decode('utf-8')
+                        sender_name = self.get_node_display_name(from_id)
+                        
+                        # Add to message history with timestamp
+                        timestamp = time.strftime('%H:%M:%S')
+                        msg_text = f"[{timestamp}] Historical from {sender_name} ({from_id}): {message_text}\n"
+                        
+                        self.root.after(0, lambda t=msg_text, f=from_id: self.add_message_to_history(t, f))
+                        self.add_monitor_message(f"Historical message from {sender_name}: {message_text}", "HISTORY")
+                        
+                    except UnicodeDecodeError:
+                        logging.warning("Could not decode historical message text")
+                        
+            elif sf_message.rr == storeforward_pb2.StoreAndForward.RequestResponse.ROUTER_TEXT_BROADCAST:
+                # This is a broadcast message from history
+                if sf_message.text:
+                    try:
+                        message_text = sf_message.text.decode('utf-8')
+                        sender_name = self.get_node_display_name(from_id)
+                        
+                        timestamp = time.strftime('%H:%M:%S')
+                        msg_text = f"[{timestamp}] Historical broadcast from {sender_name} ({from_id}): {message_text}\n"
+                        
+                        self.root.after(0, lambda t=msg_text, f=from_id: self.add_message_to_history(t, f, True))  # True for broadcast
+                        self.add_monitor_message(f"Historical broadcast from {sender_name}: {message_text}", "HISTORY")
+                        
+                    except UnicodeDecodeError:
+                        logging.warning("Could not decode historical broadcast message text")
+                        
+            elif sf_message.rr == storeforward_pb2.StoreAndForward.RequestResponse.ROUTER_STATS:
+                # Store & Forward router statistics
+                if sf_message.stats:
+                    stats = sf_message.stats
+                    router_name = self.get_node_display_name(from_id)
+                    stats_msg = (f"Store & Forward stats from {router_name}: "
+                               f"{stats.messages_saved}/{stats.messages_total} messages, "
+                               f"uptime: {stats.up_time}s")
+                    logging.info(stats_msg)
+                    self.add_monitor_message(stats_msg, "STATS")
+                    
+        except Exception as e:
+            logging.error(f"Error processing Store & Forward message: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def load_alternative_message_history(self):
+        """Load message history using alternative methods when Store & Forward is not available"""
+        try:
+            logging.info("Attempting to load message history from alternative sources...")
+            
+            # Method 1: Check if there are any recent messages in the device logs
+            # This would require log access which isn't directly available
+            
+            # Method 2: Create placeholder entries for known nodes to show they're available for messaging
+            if self.interface and self.interface.nodes:
+                logging.info("Creating conversation placeholders for known nodes")
+                
+                for node_id, node_data in self.interface.nodes.items():
+                    try:
+                        user = node_data.get('user', {})
+                        node_name = user.get('longName', 'Unknown')
+                        
+                        # Create a placeholder message to show the node is available
+                        timestamp = time.strftime('%H:%M:%S')
+                        placeholder_msg = f"[{timestamp}] Ready to chat with {node_name} ({node_id})\n"
+                        
+                        # Only add if we don't already have a conversation with this node
+                        if node_id not in self.active_chats_data:
+                            self.root.after(0, lambda t=placeholder_msg, f=node_id: self.add_message_to_history(t, f))
+                            
+                    except Exception as e:
+                        logging.warning(f"Error creating placeholder for node {node_id}: {e}")
+                
+                # Add a general informational message
+                info_msg = ("Message history loaded from node database. "
+                           "Historical messages not available without Store & Forward module.")
+                self.add_monitor_message(info_msg, "INFO")
+                
+            else:
+                logging.info("No nodes available for message history placeholders")
+                
+        except Exception as e:
+            logging.error(f"Error loading alternative message history: {e}")
+            import traceback
+            traceback.print_exc()
     
     def add_monitor_message(self, message, msg_type="INFO"):
         """Add message to monitor console"""
@@ -1980,7 +2855,7 @@ No response received from target node.
         filename = filedialog.asksaveasfilename(
             defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-            initialname=f"monitor_log_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+            initialfile=f"monitor_log_{time.strftime('%Y%m%d_%H%M%S')}.txt"
         )
         
         if filename:
@@ -1998,13 +2873,147 @@ No response received from target node.
                 messagebox.showerror("Export Error", f"Failed to save log: {e}")
                 self.add_monitor_message(f"Export failed: {e}", "ERROR")
     
+    def export_raw_packets(self):
+        """Export raw packet data to a file"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[
+                ("JSON files", "*.json"), 
+                ("CSV files", "*.csv"), 
+                ("Text files", "*.txt"), 
+                ("All files", "*.*")
+            ],
+            initialfile=f"raw_packets_{time.strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        
+        if filename:
+            try:
+                if filename.endswith('.json'):
+                    # Export as JSON
+                    import json
+                    export_data = {
+                        'export_info': {
+                            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'total_packets': len(self.raw_packet_data),
+                            'exporter': 'Meshtastic GUI'
+                        },
+                        'packets': self.raw_packet_data
+                    }
+                    
+                    with open(filename, 'w') as f:
+                        json.dump(export_data, f, indent=2, default=str)
+                        
+                elif filename.endswith('.csv'):
+                    # Export as CSV
+                    import csv
+                    with open(filename, 'w', newline='') as f:
+                        if self.raw_packet_data:
+                            # Create CSV headers based on packet structure
+                            fieldnames = ['timestamp', 'interface_type', 'packet_id', 'from_id', 'to_id', 'portnum', 'payload_size', 'decoded_data']
+                            writer = csv.DictWriter(f, fieldnames=fieldnames)
+                            writer.writeheader()
+                            
+                            for entry in self.raw_packet_data:
+                                packet = entry['packet']
+                                decoded = packet.get('decoded', {})
+                                
+                                row = {
+                                    'timestamp': entry['timestamp'],
+                                    'interface_type': entry['interface_type'],
+                                    'packet_id': packet.get('id', ''),
+                                    'from_id': packet.get('fromId', packet.get('from', '')),
+                                    'to_id': packet.get('toId', packet.get('to', '')),
+                                    'portnum': decoded.get('portnum', ''),
+                                    'payload_size': len(decoded.get('payload', b'')) if isinstance(decoded.get('payload'), bytes) else '',
+                                    'decoded_data': str(decoded) if decoded else 'encrypted'
+                                }
+                                writer.writerow(row)
+                else:
+                    # Export as formatted text
+                    with open(filename, 'w') as f:
+                        f.write(f"Meshtastic Raw Packet Data Export\n")
+                        f.write(f"Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                        f.write(f"Total Packets: {len(self.raw_packet_data)}\n")
+                        f.write("=" * 80 + "\n\n")
+                        
+                        for i, entry in enumerate(self.raw_packet_data, 1):
+                            f.write(f"Packet #{i}\n")
+                            f.write(f"Timestamp: {entry['timestamp']}\n")
+                            f.write(f"Interface: {entry['interface_type']}\n")
+                            f.write(f"Raw Data: {entry['packet']}\n")
+                            f.write("-" * 80 + "\n\n")
+                
+                messagebox.showinfo("Export Successful", f"Raw packet data saved to {filename}")
+                self.add_monitor_message(f"Raw packet data exported to {filename}", "SYSTEM")
+                
+            except Exception as e:
+                messagebox.showerror("Export Error", f"Failed to save raw packet data: {e}")
+                self.add_monitor_message(f"Raw packet export failed: {e}", "ERROR")
+    
     def clear_console(self):
         """Clear the monitor console"""
         self.monitor_console.config(state=tk.NORMAL)
         self.monitor_console.delete('1.0', tk.END)
         self.monitor_console.config(state=tk.DISABLED)
         self.monitor_data.clear()
+        self.raw_packet_data.clear()  # Also clear raw packet data
         self.add_monitor_message("Console cleared", "SYSTEM")
+    
+    def write(self, text):
+        """Handle stdout/stderr redirection to console"""
+        if text.strip():  # Only log non-empty text
+            # Also print to original terminal
+            self.original_stdout.write(text)
+            self.original_stdout.flush()
+            
+            # Filter out packet processing - only show other terminal output
+            if not any(skip in text.lower() for skip in ['received packet:', 'portnum:', 'non-text message received']):
+                self.root.after(0, lambda t=text.strip(): self.add_monitor_message(t, "DEBUG"))
+        return len(text)
+    
+    def flush(self):
+        """Required for stdout/stderr redirection"""
+        pass
+    
+    def show_help(self):
+        """Show help popup with --help command output"""
+        try:
+            # Run the meshtastic --help command
+            import subprocess
+            result = subprocess.run(['meshtastic', '--help'], 
+                                  capture_output=True, text=True, timeout=10)
+            help_text = result.stdout
+            
+            if result.stderr:
+                help_text += "\n\n" + result.stderr
+                
+        except Exception as e:
+            help_text = f"Error getting help: {e}\n\nPlease run 'meshtastic --help' manually in your terminal."
+        
+        # Create popup window
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Meshtastic Help")
+        help_window.geometry("800x600")
+        
+        # Add scrolled text widget
+        help_display = scrolledtext.ScrolledText(
+            help_window,
+            wrap=tk.WORD,
+            bg='black',
+            fg='green',
+            font=('Courier', 9)
+        )
+        help_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Insert help text
+        help_display.insert('1.0', help_text)
+        help_display.config(state=tk.DISABLED)
+        
+        # Add close button
+        close_frame = ttk.Frame(help_window)
+        close_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Button(close_frame, text="Close", 
+                  command=help_window.destroy).pack(side=tk.RIGHT)
     
     def start_message_monitoring(self):
         """Start periodic message monitoring"""
@@ -2032,9 +3041,245 @@ No response received from target node.
         """Stop message monitoring"""
         self.message_monitor_active = False
     
+    def add_device_special_fields(self):
+        """Add special fields for device configuration (owner name and short name)"""
+        # Add separator
+        separator = ttk.Separator(self.config_fields_frame, orient='horizontal')
+        separator.pack(fill=tk.X, pady=10, padx=10)
+        
+        # Get current owner info from the interface
+        current_owner = ""
+        current_owner_short = ""
+        
+        try:
+            if self.interface:
+                my_info = self.interface.getMyNodeInfo()
+                if my_info:
+                    user_info = my_info.get('user', {})
+                    current_owner = user_info.get('longName', '')
+                    current_owner_short = user_info.get('shortName', '')
+        except:
+            pass
+        
+        # Owner name field
+        owner_frame = ttk.Frame(self.config_fields_frame)
+        owner_frame.pack(fill=tk.X, pady=2, padx=10)
+        
+        owner_label = ttk.Label(owner_frame, text="Owner Name:", width=20, anchor='w')
+        owner_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        owner_entry = ttk.Entry(owner_frame)
+        owner_entry.insert(0, current_owner)
+        owner_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.config_widgets['device.owner_name'] = {
+            'widget': owner_entry,
+            'field': None,  # Special field
+            'current_value': current_owner,
+            'special_type': 'owner_name'
+        }
+        
+        # Owner short name field
+        owner_short_frame = ttk.Frame(self.config_fields_frame)
+        owner_short_frame.pack(fill=tk.X, pady=2, padx=10)
+        
+        owner_short_label = ttk.Label(owner_short_frame, text="Owner Short Name:", width=20, anchor='w')
+        owner_short_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        owner_short_entry = ttk.Entry(owner_short_frame)
+        owner_short_entry.insert(0, current_owner_short)
+        owner_short_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.config_widgets['device.owner_short'] = {
+            'widget': owner_short_entry,
+            'field': None,  # Special field
+            'current_value': current_owner_short,
+            'special_type': 'owner_short'
+        }
+    
+    def add_position_special_fields(self):
+        """Add special fields for position configuration (lat, lon, alt, remove position)"""
+        # Add separator
+        separator = ttk.Separator(self.config_fields_frame, orient='horizontal')
+        separator.pack(fill=tk.X, pady=10, padx=10)
+        
+        # Get current position info
+        current_lat = ""
+        current_lon = ""
+        current_alt = ""
+        
+        try:
+            if self.interface:
+                my_info = self.interface.getMyNodeInfo()
+                if my_info:
+                    position = my_info.get('position', {})
+                    if 'latitude' in position:
+                        current_lat = str(position['latitude'])
+                    if 'longitude' in position:
+                        current_lon = str(position['longitude'])
+                    if 'altitude' in position:
+                        current_alt = str(position['altitude'])
+                        
+                # Also force a device info refresh to get latest position after setting fixed position
+                if hasattr(self, 'interface') and self.interface:
+                    try:
+                        # Request fresh node info which should include updated position
+                        self.interface.localNode.requestInfo()
+                    except:
+                        pass
+        except:
+            pass
+        
+        # Latitude field
+        lat_frame = ttk.Frame(self.config_fields_frame)
+        lat_frame.pack(fill=tk.X, pady=2, padx=10)
+        
+        lat_label = ttk.Label(lat_frame, text="Latitude:", width=20, anchor='w')
+        lat_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        lat_entry = ttk.Entry(lat_frame)
+        lat_entry.insert(0, current_lat)
+        lat_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.config_widgets['position.latitude'] = {
+            'widget': lat_entry,
+            'field': None,  # Special field
+            'current_value': current_lat,
+            'special_type': 'latitude'
+        }
+        
+        # Longitude field
+        lon_frame = ttk.Frame(self.config_fields_frame)
+        lon_frame.pack(fill=tk.X, pady=2, padx=10)
+        
+        lon_label = ttk.Label(lon_frame, text="Longitude:", width=20, anchor='w')
+        lon_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        lon_entry = ttk.Entry(lon_frame)
+        lon_entry.insert(0, current_lon)
+        lon_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.config_widgets['position.longitude'] = {
+            'widget': lon_entry,
+            'field': None,  # Special field
+            'current_value': current_lon,
+            'special_type': 'longitude'
+        }
+        
+        # Altitude field
+        alt_frame = ttk.Frame(self.config_fields_frame)
+        alt_frame.pack(fill=tk.X, pady=2, padx=10)
+        
+        alt_label = ttk.Label(alt_frame, text="Altitude (meters):", width=20, anchor='w')
+        alt_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        alt_entry = ttk.Entry(alt_frame)
+        alt_entry.insert(0, current_alt)
+        alt_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        self.config_widgets['position.altitude'] = {
+            'widget': alt_entry,
+            'field': None,  # Special field
+            'current_value': current_alt,
+            'special_type': 'altitude'
+        }
+        
+        # Remove position button
+        remove_frame = ttk.Frame(self.config_fields_frame)
+        remove_frame.pack(fill=tk.X, pady=10, padx=10)
+        
+        remove_button = ttk.Button(remove_frame, text="Remove Fixed Position", 
+                                  command=self.remove_fixed_position)
+        remove_button.pack(side=tk.LEFT)
+        
+    def remove_fixed_position(self):
+        """Remove fixed position from device"""
+        if not self.interface:
+            messagebox.showwarning("Warning", "Not connected to device")
+            return
+        
+        try:
+            # Clear position fields in the interface
+            if hasattr(self.interface, 'clearFixedPosition'):
+                self.interface.clearFixedPosition()
+            
+            messagebox.showinfo("Success", "Fixed position removed from device")
+            
+            # Reload the position configuration section
+            self.load_config_section('position')
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to remove fixed position: {e}")
+    
+    def process_special_field_changes(self, special_changes, config_type):
+        """Process changes to special fields like owner name and position"""
+        changes_made = False
+        
+        try:
+            # Handle owner name and short name changes (device config)
+            if config_type == 'device':
+                if 'owner_name' in special_changes:
+                    owner_name = special_changes['owner_name'].strip()
+                    if owner_name:
+                        # Use setOwner method if available
+                        if hasattr(self.interface, 'setOwner'):
+                            self.interface.setOwner(owner_name)
+                            changes_made = True
+                            print(f"Set owner name to: {owner_name}")
+                
+                if 'owner_short' in special_changes:
+                    owner_short = special_changes['owner_short'].strip()
+                    if owner_short:
+                        # Use setOwnerShort method if available  
+                        if hasattr(self.interface, 'setOwnerShort'):
+                            self.interface.setOwnerShort(owner_short)
+                            changes_made = True
+                            print(f"Set owner short name to: {owner_short}")
+            
+            # Handle position changes (position config)
+            elif config_type == 'position':
+                lat = special_changes.get('latitude', '').strip()
+                lon = special_changes.get('longitude', '').strip()
+                alt = special_changes.get('altitude', '').strip()
+                
+                # Check if we have valid position data
+                if lat or lon or alt:
+                    try:
+                        # Convert to appropriate values, default to 0 if empty
+                        lat_val = float(lat) if lat else 0.0
+                        lon_val = float(lon) if lon else 0.0  
+                        alt_val = int(alt) if alt else 0
+                        
+                        # Use CLI-style method to set fixed position
+                        print(f"Setting fixed position: lat={lat_val}, lon={lon_val}, alt={alt_val}")
+                        
+                        # Get local node and set fixed position (like CLI does)
+                        local_node = self.interface.localNode
+                        local_node.setFixedPosition(lat_val, lon_val, alt_val)
+                        
+                        changes_made = True
+                        print(f"Set fixed position: {lat_val}, {lon_val}, {alt_val}m")
+                        
+                    except ValueError as e:
+                        messagebox.showerror("Error", f"Invalid position values: {e}")
+        
+        except Exception as e:
+            print(f"Error processing special field changes: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        return changes_made
+    
     def run(self):
         """Start the GUI application"""
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            # Restore original stdout/stderr
+            if hasattr(self, 'original_stdout'):
+                import sys
+                sys.stdout = self.original_stdout
+                sys.stderr = self.original_stderr
 
 
 def main():

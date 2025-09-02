@@ -1160,7 +1160,7 @@ class MeshInterface:  # pylint: disable=R0902
             self._startHeartbeat()
             publishingThread.queueWork(
                 lambda: pub.sendMessage(
-                    "meshtastic.connection.established", interface=self
+                    "meshtastic.connection.established", interface=self, topic="meshtastic.connection.established"
                 )
             )
 

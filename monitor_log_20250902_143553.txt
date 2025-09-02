@@ -1,0 +1,21 @@
+Meshtastic Monitor Log - Exported 2025-09-02 14:35:55
+============================================================
+
+[14:29:16] SYSTEM: Monitor console initialized
+[14:29:16] SYSTEM: PubSub subscriptions initialized
+[14:29:16] DEBUG: PubSub subscriptions set up
+[14:29:21] DEBUG: Starting connection thread...
+[14:29:21] DEBUG: Connecting to serial port: /dev/ttyACM0
+[14:29:23] DEBUG: Interface created, waiting for stabilization...
+[14:29:25] DEBUG: Connection process completed
+[14:29:25] DEBUG: INFO:root:Store & Forward module not enabled - skipping message history
+[14:29:32] RX: RX: Packet ID:1106724493 Node None→Broadcast (portnum=NODEINFO_APP, size=70B, user="W0FDZ")
+[14:30:38] RX: RX: Packet ID:1538704315 W0FDZ→Broadcast (portnum=NODEINFO_APP, size=70B, user="W0FDZ")
+[14:30:56] TX: TX: hi to Broadcast (^all)
+[14:31:08] TX: TX: hi to untap  (!a0cc74d4)
+[14:31:15] DEBUG: Received text message from !a0cc74d4 to !99bc8be4: Hi
+[14:31:15] RX: RX: Hi from untap  (!a0cc74d4)
+[14:31:15] RX: RX: Packet ID:2045547833 untap →time2go0U7 (portnum=TEXT_MESSAGE_APP, size=2B, text="Hi")
+[14:31:28] DEBUG: Packet has no decoded data
+[14:31:28] RX: RX: Packet ID:4028062497 Node None→Broadcast (encrypted/unknown)
+[14:35:51] RX: RX: Packet ID:456595420 Artemis Station | https://bayme.sh→Broadcast (portnum=NODEINFO_APP, size=97B, user="Artemis Station | https://bayme.sh")
